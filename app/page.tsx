@@ -1,63 +1,69 @@
 'use client';
 
 import { useState } from 'react';
-import { Send, Mic, Bot, User, Sparkles } from 'lucide-react';
-
-interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-}
+import { useChat } from 'ai/react';
+import { Send, Mic, Bot, User, Sparkles, Loader2 } from 'lucide-react';
 
 export default function IdeaSpeak() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      role: 'assistant',
-      content: "👋 Welcome to IdeaSpeak! Speak or type your app idea, and I'll use Grok Build + xAI to bring it to life. What do you want to build today?"
+  const { messages, input, handleInputChange, handleSubmit, isLoading, append } = useChat({
+    api: '/api/chat',
+  });
+
+  const [isListening, setIsListening] = useState(false);
+  const [voiceTranscript, setVoiceTranscript] = useState('');
+  const recognitionRef = useRef<any>(null);
+
+  // VoiceInput logic (full Web Speech API)
+  useEffect(() => {
+    if (typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      recognitionRef.current = new SpeechRecognition();
+      const rec = recognitionRef.current;
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = 'en-US';
+
+      rec.onresult = (event: any) => {
+        let interimTranscript = '';
+        let finalTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript;
+          } else {
+            interimTranscript += event.results[i][0].transcript;
+          }
+        }
+        setVoiceTranscript(finalTranscript + interimTranscript);
+      };
+
+      rec.onerror = () => setIsListening(false);
+      rec.onend = () => setIsListening(false);
     }
-  ]);
-  const [input, setInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-
-  const sendMessage = async () => {
-    if (!input.trim()) return;
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: input
+    return () => {
+      if (recognitionRef.current) recognitionRef.current.stop();
     };
+  }, []);
 
-    setMessages(prev => [...prev, userMessage]);
-    setInput('');
-    setIsLoading(true);
+  const toggleVoice = () => {
+    const rec = recognitionRef.current;
+    if (!rec) {
+      alert('Speech recognition not supported in this browser.');
+      return;
+    }
+    if (isListening) {
+      rec.stop();
+    } else {
+      setVoiceTranscript('');
+      rec.start();
+      setIsListening(true);
+    }
+  };
 
-    try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: input, history: messages }),
-      });
-
-      const data = await response.json();
-      
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: data.reply || "I've got your idea! Grok is now planning the build..."
-      };
-
-      setMessages(prev => [...prev, assistantMessage]);
-    } catch (error) {
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: "Sorry, something went wrong. Try again!"
-      };
-      setMessages(prev => [...prev, errorMessage]);
-    } finally {
-      setIsLoading(false);
+  const useVoiceTranscript = () => {
+    if (voiceTranscript.trim()) {
+      append({ role: 'user', content: voiceTranscript.trim() });
+      setVoiceTranscript('');
+      setIsListening(false);
     }
   };
 
@@ -87,11 +93,17 @@ export default function IdeaSpeak() {
 
           <div className="pt-6 border-t border-zinc-800">
             <button 
-              onClick={() => alert('Voice mode coming soon - powered by xAI Voice!')}
-              className="w-full flex items-center justify-center gap-2 bg-white text-black py-3 rounded-xl font-medium hover:bg-zinc-200 transition-colors"
+              onClick={toggleVoice}
+              className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl font-medium transition-all ${isListening ? 'bg-red-500 text-white animate-pulse' : 'bg-white text-black hover:bg-zinc-200'}`}
             >
-              <Mic className="w-5 h-5" /> Speak Your Idea
+              <Mic className="w-5 h-5" /> 
+              {isListening ? 'Listening... (click to stop)' : 'Speak Your Idea'}
             </button>
+            {voiceTranscript && (
+              <button onClick={useVoiceTranscript} className="mt-2 w-full text-xs bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded-xl">
+                Use transcript: "{voiceTranscript.substring(0, 60)}..."
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -129,9 +141,9 @@ export default function IdeaSpeak() {
             <div className="flex justify-start">
               <div className="max-w-[80%] flex gap-4">
                 <div className="w-8 h-8 bg-zinc-800 rounded-full flex items-center justify-center">
-                  <Bot size={18} />
+                  <Loader2 className="w-5 h-5 animate-spin" />
                 </div>
-                <div className="p-5 rounded-3xl bg-zinc-800">Thinking with Grok Build...</div>
+                <div className="p-5 rounded-3xl bg-zinc-800">Grok is building with xAI...</div>
               </div>
             </div>
           )}
@@ -142,25 +154,25 @@ export default function IdeaSpeak() {
           <div className="flex gap-3 max-w-4xl mx-auto">
             <textarea
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={handleInputChange}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
-                  sendMessage();
+                  handleSubmit();
                 }
               }}
-              placeholder="Describe your app idea in natural language... (e.g. Build a real estate listing generator with voice input)"
+              placeholder="Describe your app idea in natural language... or use voice"
               className="flex-1 bg-zinc-800 border border-zinc-700 rounded-3xl px-6 py-5 text-lg resize-y min-h-[60px] max-h-[200px] focus:outline-none focus:border-violet-500"
             />
             <button
-              onClick={sendMessage}
+              onClick={handleSubmit}
               disabled={isLoading || !input.trim()}
               className="h-[60px] w-[60px] bg-violet-600 hover:bg-violet-500 rounded-2xl flex items-center justify-center disabled:opacity-50 transition-all"
             >
               <Send className="w-6 h-6" />
             </button>
           </div>
-          <p className="text-center text-xs text-zinc-500 mt-3">Powered by Grok • Voice coming soon</p>
+          <p className="text-center text-xs text-zinc-500 mt-3">Voice enabled • Powered by Grok • xAI</p>
         </div>
       </div>
 
@@ -171,12 +183,6 @@ export default function IdeaSpeak() {
           <div className="text-center text-zinc-500">
             <Sparkles className="mx-auto mb-3" />
             Preview appears here after build
-          </div>
-        </div>
-        <div className="mt-8 space-y-4">
-          <div className="text-sm font-medium">Grok Build Status</div>
-          <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
-            <div className="h-2 bg-emerald-500 w-1/3 rounded-full"></div>
           </div>
         </div>
       </div>
